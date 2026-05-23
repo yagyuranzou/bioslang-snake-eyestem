@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BIOSLANG // SNAKE EYESTEM // TERMINAL</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html {
+            width: 100%; height: 100%; background-color: #050505;
+            font-family: 'MS Gothic', 'Courier New', monospace; overflow: hidden; color: #00ff33;
+        }
+
+        /* 強化版 CRT 掃描線與螢幕閃爍效果 */
+        body::after {
+            content: " "; display: block; position: fixed; top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%),
+                        linear-gradient(90deg, rgba(0, 255, 0, 0.03), rgba(0, 0, 0, 0.1), rgba(0, 255, 0, 0.03));
+            z-index: 999; background-size: 100% 4px, 8px 100%; pointer-events: none;
+            animation: flicker 0.15s infinite;
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.95; }
+            50% { opacity: 0.85; }
+            100% { opacity: 0.95; }
+        }
+
+        #terminal-matrix {
+            display: flex; width: 100%; height: 100%; padding: 12px; gap: 12px; background: #000;
+        }
+
+        #left-panel {
+            width: 380px; height: 100%; display: flex; flex-direction: column; gap: 10px; z-index: 10;
+        }
+
+        #brand-header {
+            border: 2px solid #00ff33; background: rgba(0, 5, 2, 0.95); padding: 15px;
+            box-shadow: 0 0 15px rgba(0, 255, 51, 0.3);
+            position: relative;
+        }
+        #brand-header::before {
+            content: "REC"; position: absolute; top: 15px; right: 15px;
+            color: #ff2200; font-weight: bold; animation: blink 1s infinite;
+        }
+        @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+        #brand-header h1 { font-size: 24px; font-weight: 900; letter-spacing: -1px; color: #00ff33; text-transform: uppercase; }
+        #brand-header p { font-size: 12px; color: #ff2200; font-weight: bold; margin-top: 4px; letter-spacing: 1px; }
+
+        #audio-visualizer {
+            height: 40px; border: 1px solid #00ff33; margin-top: 10px; display: flex; align-items: flex-end; gap: 2px; padding: 2px;
+        }
+        .bar { background: #00ff33; flex: 1; transition: height 0.05s ease; }
+
+        #log-stream {
+            flex: 1; border: 2px solid #00ff33; background: rgba(0, 4, 1, 0.95);
+            padding: 15px 12px; font-size: 12px; line-height: 1.6; overflow: hidden;
+            display: flex; flex-direction: column; justify-content: flex-end;
+            box-shadow: inset 0 0 20px rgba(0, 255, 51, 0.2); white-space: pre-wrap;
+        }
+
+        #viewport-container {
+            flex: 1; height: 100%; border: 2px solid #00ff33; background: #111;
+            position: relative; overflow: hidden; box-shadow: 0 0 30px rgba(0, 255, 51, 0.15);
+        }
+
+        #webcam {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; z-index: 1; transform: scaleX(-1);
+            filter: saturate(1.5) contrast(1.4) hue-rotate(-10deg) sepia(0.3);
+            display: none; 
+        }
+
+        #hud-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2;
+            transform: scaleX(-1); 
+        }
+
+        #text-overlay-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none;
+        }
+
+        #error-msg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #ff2200; background: rgba(0,0,0,0.95); padding: 20px 30px; border: 2px solid #ff2200;
+            font-size: 18px; text-align: center; z-index: 100; display: none; max-width: 80%;
+        }
+
+        #overlay-status {
+            position: absolute; bottom: 15px; left: 15px; z-index: 4;
+            font-size: 12px; color: #00ff33; text-shadow: 0 0 8px #00ff33;
+            background: rgba(0, 4, 1, 0.85); padding: 10px 15px; border: 1px solid #00ff33;
+        }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+        .status-dot.active { background: #00ff33; box-shadow: 0 0 10px #00ff33; }
+        .status-dot.inactive { background: #333; }
+    </style>
+</head>
+<body>
+
+<div id="terminal-matrix">
+    <div id="left-panel">
+        <div id="brand-header">
+            <h1>BIOSLANG SNAKE EYESTEM</h1>
+            <p>全領域アクティブ検閲追跡装置 // V5.0</p>
+            <div id="audio-visualizer"></div>
+        </div>
+        <div id="log-stream"></div>
+    </div>
+
+    <div id="viewport-container">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="hud-canvas"></canvas>
+        <canvas id="text-overlay-canvas"></canvas>
+        <div id="error-msg"></div>
+        <div id="overlay-status">
+            <div><span class="status-dot" id="dot-face"></span> NEURAL_FACE_MESH</div>
+            <div style="margin-top:5px;"><span class="status-dot" id="dot-left"></span> LEFT_KINETIC_TRACK</div>
+            <div style="margin-top:5px;"><span class="status-dot" id="dot-right"></span> RIGHT_KINETIC_TRACK</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('hud-canvas');
+    const ctx = canvas.getContext('2d');
+    const textCanvas = document.getElementById('text-overlay-canvas');
+    const textCtx = textCanvas.getContext('2d');
+    const video = document.getElementById('webcam');
+    const logStream = document.getElementById('log-stream');
+    const errorMsg = document.getElementById('error-msg');
+    
+    const dotFace = document.getElementById('dot-face');
+    const dotLeft = document.getElementById('dot-left');
+    const dotRight = document.getElementById('dot-right');
+    const visualizer = document.getElementById('audio-visualizer');
+    
+    const bars = [];
+    for(let i=0; i<16; i++) {
+        let bar = document.createElement('div');
+        bar.className = 'bar';
+        visualizer.appendChild(bar);
+        bars.push(bar);
+    }
+
+    let audioCtx = null, analyser = null, audioData = [];
+    let audioVolume = 0;
+    const maxLogs = 25;
+
+    // 畫面污染特效變數
+    const floatingCodes = [];
+    let apiGlitch = 0;
+
+    let apiData = { nasa: "SOLAR_WIND: CONNECTING...", tezos: "XTZ_MAINNET: SYNCING...", geo: "SAT_UPLINK: WAITING..." };
+
+    const logPool = [
+        "[SYSTEM] EYESTEM_CORE: LINKED // 監視網展開",
+        "[警告] 異常な生体シグナルを検知",
+        "[HOLISTIC] 骨格マッピング進行中... 98%",
+        "[AUDIO] INTERCEPTING FREQ WAVE",
+        "[SECURITY] 未確認の挙動を追跡中",
+        "[DATA] NEURAL_NETWORK_SYNC_COMPLETE"
+    ];
+
+    function resize() {
+        canvas.width = canvas.parentElement.clientWidth;
+        canvas.height = canvas.parentElement.clientHeight;
+        textCanvas.width = canvas.parentElement.clientWidth;
+        textCanvas.height = canvas.parentElement.clientHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function pushLog() {
+        const ts = new Date().toISOString().slice(11, 23);
+        let msg = logPool[Math.floor(Math.random() * logPool.length)];
+        if (Math.random() > 0.8) msg = `[NASA] ${apiData.nasa}`;
+        if (Math.random() > 0.85) msg = `[TEZOS] ${apiData.tezos}`;
+
+        const logLine = document.createElement('div');
+        logLine.style.color = msg.includes('警告') ? '#ff2200' : '#00ff33';
+        logLine.textContent = `${ts} ${msg}`;
+        logStream.appendChild(logLine);
+        if (logStream.childNodes.length > maxLogs) logStream.removeChild(logStream.firstChild);
+    }
+    setInterval(pushLog, 150);
+
+    // 產生畫面污染代碼 (Matrix Rain / Data Bleed) — 大字版
+    setInterval(() => {
+        if (floatingCodes.length < 80) {
+            const sizeRand = Math.random();
+            let fontSize = 13;
+            if (sizeRand > 0.92) fontSize = 34;
+            else if (sizeRand > 0.75) fontSize = 22;
+            else if (sizeRand < 0.25) fontSize = 10;
+
+            const text = Math.random() > 0.6 ? logPool[Math.floor(Math.random() * logPool.length)] : `0x${Math.floor(Math.random()*16777215).toString(16).toUpperCase().padStart(6,'0')} // MEM_DUMP`;
+            floatingCodes.push({
+                text: text,
+                x: Math.random() * ((textCanvas.width || 800) - 200),
+                y: Math.random() * (textCanvas.height || 600),
+                fontSize: fontSize,
+                speed: 0.8 + Math.random() * 2,
+                color: (text.includes('警告') || text.includes('ALERT')) ? '#ff2200' : `rgba(0, 255, 51, ${0.35 + Math.random() * 0.55})`
+            });
+        }
+    }, 80);
+
+    async function updateAPIs() {
+        try {
+            const res = await fetch('https://api.tzkt.io/v1/blocks/count');
+            if (res.ok) apiData.tezos = `XTZ_BLOCK: #${await res.text()} // SECURE`;
+        } catch (e) {}
+        apiData.geo = `LAT: ${(Math.random()*180-90).toFixed(4)} LON: ${(Math.random()*360-180).toFixed(4)}`;
+    }
+    setInterval(updateAPIs, 10000);
+    updateAPIs();
+
+    const holistic = new Holistic({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}` });
+    holistic.setOptions({
+        modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false,
+        refineFaceLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+    });
+
+    holistic.onResults((results) => {
+        const w = textCanvas.width;
+        const h = textCanvas.height;
+
+        // 1. 底層 HUD 繪製 (影像與網格)
+        ctx.save();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.filter = 'saturate(1.2) contrast(1.3) grayscale(0.2)';
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+        ctx.filter = 'none';
+
+        let meshColor = audioVolume > 38 ? '#ff2200' : '#00ff33';
+        let lineWidth = audioVolume > 38 ? 2 : 1;
+
+        if (results.faceLandmarks) {
+            drawConnectors(ctx, results.faceLandmarks, FACEMESH_TESSELATION, {color: meshColor, lineWidth: lineWidth, opacity: 0.3});
+            drawConnectors(ctx, results.faceLandmarks, FACEMESH_RIGHT_EYE, {color: '#ffffff'});
+            drawConnectors(ctx, results.faceLandmarks, FACEMESH_LEFT_EYE, {color: '#ffffff'});
+        }
+        if (results.leftHandLandmarks) {
+            drawConnectors(ctx, results.leftHandLandmarks, HAND_CONNECTIONS, {color: '#00ff33', lineWidth: 3});
+            drawLandmarks(ctx, results.leftHandLandmarks, {color: '#ffffff', lineWidth: 2, radius: 3});
+        }
+        if (results.rightHandLandmarks) {
+            drawConnectors(ctx, results.rightHandLandmarks, HAND_CONNECTIONS, {color: '#00ff33', lineWidth: 3});
+            drawLandmarks(ctx, results.rightHandLandmarks, {color: '#ffffff', lineWidth: 2, radius: 3});
+        }
+        ctx.restore();
+
+        // 2. 上層標籤與污染繪製
+        textCtx.clearRect(0, 0, w, h);
+        
+        // --- 重新加入的畫面污染特效 (Data Bleed) ---
+        apiGlitch = (Math.random() > 0.88 || audioVolume > 38) ? (Math.random() - 0.5) * (40 + audioVolume * 4) : 0;
+        for (let i = floatingCodes.length - 1; i >= 0; i--) {
+            let code = floatingCodes[i];
+            code.y -= code.speed;
+            if (code.y < -20) {
+                floatingCodes.splice(i, 1);
+                continue;
+            }
+            textCtx.font = `bold ${code.fontSize || 13}px 'MS Gothic', monospace`;
+            textCtx.fillStyle = code.color || `rgba(0, 255, 51, 0.5)`;
+            textCtx.fillText(code.text, code.x + apiGlitch, code.y);
+        }
+
+        // --- 鎖定框繪製 ---
+        const drawBoxAndText = (landmarks, label, dotEl, boxColor) => {
+            if (!landmarks) { dotEl.className = 'status-dot inactive'; return; }
+            dotEl.className = 'status-dot active';
+            
+            let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+            for (const p of landmarks) {
+                const px = (1 - p.x) * w; 
+                const py = p.y * h;
+                if (px < x1) x1 = px; if (py < y1) y1 = py;
+                if (px > x2) x2 = px; if (py > y2) y2 = py;
+            }
+            
+            const boxW = x2 - x1, boxH = y2 - y1, padding = 20;
+
+            textCtx.strokeStyle = boxColor; textCtx.lineWidth = 2;
+            textCtx.strokeRect(x1 - padding, y1 - padding, boxW + padding*2, boxH + padding*2);
+            textCtx.fillStyle = boxColor; textCtx.font = "bold 14px 'MS Gothic', sans-serif";
+            textCtx.fillText(label, x1 - padding + apiGlitch, y1 - padding - 8);
+
+            textCtx.beginPath();
+            textCtx.moveTo(x1 + boxW/2, y1 + boxH/2 - 10); textCtx.lineTo(x1 + boxW/2, y1 + boxH/2 + 10);
+            textCtx.moveTo(x1 + boxW/2 - 10, y1 + boxH/2); textCtx.lineTo(x1 + boxW/2 + 10, y1 + boxH/2);
+            textCtx.stroke();
+        };
+
+        drawBoxAndText(results.faceLandmarks, '[ 警告 // 被験者A:頭部領域固定 ]', dotFace, audioVolume > 38 ? '#ff2200' : '#ff1a1a');
+        drawBoxAndText(results.leftHandLandmarks, '[ 追跡 // 左側末梢肢体捕捉 ]', dotLeft, '#00ff33');
+        drawBoxAndText(results.rightHandLandmarks, '[ 追跡 // 右側末梢肢体捕捉 ]', dotRight, '#00ff33');
+
+        // --- 恢復你原始的音量過載警告特效 ---
+        if (audioVolume > 38) {
+            textCtx.fillStyle = 'rgba(255, 0, 0, 0.08)';
+            textCtx.fillRect(0, 0, w, h);
+
+            textCtx.strokeStyle = '#ff2200';
+            textCtx.lineWidth = 16;
+            textCtx.strokeRect(0, 0, w, h);
+
+            textCtx.save();
+            textCtx.font = "bold 64px 'MS Gothic'";
+            textCtx.fillStyle = '#ff2200';
+            textCtx.textAlign = 'center';
+            textCtx.textBaseline = 'middle';
+            // 文字加上 Glitch 抖動
+            textCtx.fillText('⚠ AUDIO OVERLOAD', w / 2 + apiGlitch, h / 2);
+            textCtx.restore();
+        }
+    });
+
+    async function startSystem() {
+        errorMsg.style.display = 'none';
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 1280, height: 720, facingMode: "user" },
+                audio: true
+            });
+            video.srcObject = stream;
+
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const micSource = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 64; 
+            audioData = new Uint8Array(analyser.frequencyBinCount);
+            micSource.connect(analyser);
+
+            const camera = new Camera(video, {
+                onFrame: async () => { await holistic.send({ image: video }); },
+                width: 1280, height: 720
+            });
+            camera.start();
+
+            function updateAudioUI() {
+                if(analyser) {
+                    analyser.getByteFrequencyData(audioData);
+                    let sum = 0;
+                    for(let i=0; i<16; i++) {
+                        let val = audioData[i] || 0;
+                        sum += val;
+                        bars[i].style.height = (val / 255 * 100) + '%';
+                        bars[i].style.background = val > 200 ? '#ff2200' : '#00ff33';
+                    }
+                    audioVolume = sum / 16;
+                }
+                requestAnimationFrame(updateAudioUI);
+            }
+            updateAudioUI();
+
+        } catch (err) {
+            console.error(err);
+            errorMsg.style.display = 'block';
+            errorMsg.innerHTML = 'SYSTEM BOOT FAILED<br>請允許攝影機與麥克風權限<br><br><span style="color:#00ff33;cursor:pointer" onclick="startSystem()">[ RETRY_INIT ]</span>';
+        }
+    }
+
+    window.addEventListener('click', () => {
+        if (!video.srcObject) startSystem();
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    }, {once: true});
+
+    setTimeout(() => {
+        if (!video.srcObject) {
+            errorMsg.style.display = 'block';
+            errorMsg.innerHTML = 'AWAITING USER OVERRIDE<br><br>請點擊畫面任意處啟動系統';
+        }
+    }, 1000);
+
+</script>
+</body>
+</html>
